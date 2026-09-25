@@ -120,6 +120,14 @@ body{
 .stat .v{font-family:var(--font-display); font-weight:700; font-size:16px}
 .stat .l{font-size:10.5px; color:var(--muted); margin-top:3px}
 .acc-note{font-size:11.5px; color:var(--muted); max-width:300px}
+.motion-msg{
+  font-family:var(--font-display); font-weight:700; font-size:15px;
+  padding:8px 18px; border-radius:999px; border:1px solid var(--line);
+  background:var(--surface);
+}
+.motion-msg.still{color:var(--muted)}
+.motion-msg.walk{color:var(--accent2); border-color:rgba(72,215,224,.35)}
+.motion-msg.fast{color:var(--accent); border-color:rgba(255,106,61,.4)}
 
 .foot{
   position:relative; z-index:1; text-align:center; font-size:11px; color:var(--muted);
@@ -174,6 +182,8 @@ body{
     </div>
   </div>
 
+  <div class="motion-msg still" id="motionMsg">You're not moving</div>
+
   <div class="stat-row">
     <div class="stat"><div class="v" id="mps">--</div><div class="l">M/S</div></div>
     <div class="stat"><div class="v" id="mph">--</div><div class="l">MPH</div></div>
@@ -213,9 +223,13 @@ const maxEl = document.getElementById('maxSpeed');
 const accEl = document.getElementById('acc');
 const accNoteEl = document.getElementById('accNote');
 const permErrEl = document.getElementById('permErr');
+const motionMsgEl = document.getElementById('motionMsg');
 
 const ARC_LEN = 282.7;   // circumference of the semicircle path above
 const SCALE_MAX_KMH = 180; // gauge full-scale reference
+const NOISE_FLOOR_MPS = 0.28;   // ~1 km/h — below this, treat GPS drift as standing still
+const WALK_CEILING_KMH = 7;     // above this, treat as fast/vehicle motion
+let speedHistory = [];
 
 function setStatus(kind, text){
   dotEl.className = 'dot ' + kind;
@@ -231,9 +245,15 @@ function haversine(lat1, lon1, lat2, lon2){
 
 function updateDisplay(mps, accuracy){
   if(mps == null || isNaN(mps) || mps < 0) mps = 0;
-  const kmh = mps * 3.6, mph = mps * 2.23694;
+  if(mps < NOISE_FLOOR_MPS) mps = 0; // ignore GPS position jitter while standing still
+
+  speedHistory.push(mps);
+  if(speedHistory.length > 4) speedHistory.shift();
+  const smoothed = speedHistory.reduce((a,b) => a+b, 0) / speedHistory.length;
+
+  const kmh = smoothed * 3.6, mph = smoothed * 2.23694;
   speedEl.textContent = kmh.toFixed(1);
-  mpsEl.textContent = mps.toFixed(2);
+  mpsEl.textContent = smoothed.toFixed(2);
   mphEl.textContent = mph.toFixed(1);
   if(kmh > maxKmh){ maxKmh = kmh; maxEl.textContent = maxKmh.toFixed(1); }
   const pct = Math.min(kmh / SCALE_MAX_KMH, 1);
@@ -241,6 +261,17 @@ function updateDisplay(mps, accuracy){
   if(accuracy != null){
     accEl.textContent = Math.round(accuracy);
     accNoteEl.textContent = 'Fix accuracy ≈ ±' + Math.round(accuracy) + ' m — smaller is more reliable.';
+  }
+
+  if(kmh < 1){
+    motionMsgEl.textContent = "You're not moving";
+    motionMsgEl.className = 'motion-msg still';
+  } else if(kmh < WALK_CEILING_KMH){
+    motionMsgEl.textContent = 'Look ahead';
+    motionMsgEl.className = 'motion-msg walk';
+  } else {
+    motionMsgEl.textContent = 'Safe journey';
+    motionMsgEl.className = 'motion-msg fast';
   }
 }
 
@@ -295,10 +326,12 @@ async function start(){
 
 function stop(){
   if(watchId != null) navigator.geolocation.clearWatch(watchId);
-  watchId = null; lastPos = null; maxKmh = 0;
+  watchId = null; lastPos = null; maxKmh = 0; speedHistory = [];
   speedEl.textContent = '0.0'; arcEl.setAttribute('stroke-dashoffset', ARC_LEN);
   mpsEl.textContent = mphEl.textContent = maxEl.textContent = accEl.textContent = '--';
   accNoteEl.textContent = '';
+  motionMsgEl.textContent = "You're not moving";
+  motionMsgEl.className = 'motion-msg still';
 }
 </script>
 </body>
