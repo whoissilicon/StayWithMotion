@@ -1,1 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Stay With Motion</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0a0d16; --surface:#131a2a; --surface2:#171f33; --line:#232c42;
+  --text:#eef1f8; --muted:#7c8aa3;
+  --accent:#ff6a3d; --accent2:#48d7e0; --bad:#ff5c6a;
+  --font-display:'Space Grotesk',ui-sans-serif,system-ui,sans-serif;
+  --font-body:'Inter',ui-sans-serif,system-ui,sans-serif;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+*{box-sizing:inherit}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --bg:#f3f4f8; --surface:#ffffff; --surface2:#eef0f6; --line:#dde1ec;
+    --text:#0f1320; --muted:#5b6479;
+  }
+}
+html,body{height:100%;margin:0}
+body{
+  background:var(--bg); color:var(--text); font-family:var(--font-body);
+  min-height:100%; overflow-x:hidden; position:relative;
+}
+.bg-motion{
+  position:fixed; inset:-10% -10% -10% -10%; z-index:0; pointer-events:none;
+  background:
+    repeating-linear-gradient(115deg, transparent 0 46px, rgba(255,106,61,0.05) 46px 47px, transparent 47px 92px),
+    repeating-linear-gradient(115deg, transparent 0 22px, rgba(72,215,224,0.04) 22px 23px, transparent 23px 92px);
+  background-size:200% 200%;
+  animation:drift 22s linear infinite;
+}
+@keyframes drift{ to{ background-position:340px 0, -220px 0; } }
+@media (prefers-reduced-motion: reduce){ .bg-motion{ animation:none } }
 
+.screen{
+  position:relative; z-index:1; min-height:100%; display:none;
+  flex-direction:column; align-items:center; justify-content:center;
+  padding:32px 22px 40px; text-align:center; gap:20px;
+}
+.screen.active{display:flex}
+
+/* -------- Welcome -------- */
+.mark{
+  font-family:var(--font-display); font-weight:700; font-size:13px;
+  letter-spacing:.14em; color:var(--accent2); text-transform:uppercase;
+}
+.title-xl{
+  font-family:var(--font-display); font-weight:700; font-size:44px;
+  line-height:1.04; letter-spacing:-.5px; max-width:340px;
+}
+.title-xl .em{color:var(--accent)}
+.lede{color:var(--muted); font-size:15px; line-height:1.6; max-width:300px}
+.chips{display:flex; gap:8px; flex-wrap:wrap; justify-content:center; margin-top:4px}
+.chip{
+  font-size:12px; color:var(--text); border:1px solid var(--line); border-radius:999px;
+  padding:6px 13px; background:var(--surface);
+}
+
+/* -------- Buttons -------- */
+.btn{
+  appearance:none; border:none; cursor:pointer; font-family:var(--font-body);
+  font-weight:600; font-size:15px; padding:16px 28px; border-radius:14px;
+  width:100%; max-width:300px;
+}
+.btn-primary{background:var(--accent); color:#170a04}
+.btn-ghost{background:transparent; color:var(--muted); border:1px solid var(--line)}
+.btn:disabled{opacity:.5; cursor:default}
+
+/* -------- Permission -------- */
+.pin{width:64px; height:64px}
+.perm-card{
+  background:var(--surface); border:1px solid var(--line); border-radius:20px;
+  padding:22px; max-width:320px; text-align:left;
+}
+.perm-card p{margin:0; font-size:13.5px; color:var(--muted); line-height:1.65}
+.perm-card p + p{margin-top:10px}
+.err{
+  font-size:12.5px; color:var(--bad); background:rgba(255,92,106,.08);
+  border:1px solid rgba(255,92,106,.25); border-radius:12px; padding:10px 14px;
+  max-width:320px; text-align:left; display:none;
+}
+.err.show{display:block}
+
+/* -------- Live gauge -------- */
+.gauge-wrap{position:relative; width:min(78vw,300px)}
+.gauge-wrap svg{width:100%; display:block}
+.readout{
+  position:absolute; left:0; right:0; bottom:6%; text-align:center;
+}
+.readout .num{
+  font-family:var(--font-display); font-weight:700; font-size:52px;
+  letter-spacing:-1px; line-height:1;
+}
+.readout .u{font-size:12.5px; color:var(--muted); margin-top:2px; letter-spacing:.04em}
+.pulse-row{display:flex; align-items:center; gap:7px; font-size:12.5px; color:var(--muted)}
+.dot{width:7px; height:7px; border-radius:50%; background:var(--muted)}
+.dot.live{background:var(--accent2); box-shadow:0 0 0 0 rgba(72,215,224,.55); animation:pulse 1.6s infinite}
+.dot.wait{background:#e8b23d}
+.dot.bad{background:var(--bad)}
+@keyframes pulse{
+  0%{box-shadow:0 0 0 0 rgba(72,215,224,.5)}
+  70%{box-shadow:0 0 0 9px rgba(72,215,224,0)}
+  100%{box-shadow:0 0 0 0 rgba(72,215,224,0)}
+}
+.stat-row{display:flex; gap:10px; width:100%; max-width:340px}
+.stat{
+  flex:1; background:var(--surface); border:1px solid var(--line); border-radius:14px;
+  padding:12px 6px; text-align:center;
+}
+.stat .v{font-family:var(--font-display); font-weight:700; font-size:16px}
+.stat .l{font-size:10.5px; color:var(--muted); margin-top:3px}
+.acc-note{font-size:11.5px; color:var(--muted); max-width:300px}
+
+.foot{
+  position:relative; z-index:1; text-align:center; font-size:11px; color:var(--muted);
+  padding:6px 0 18px;
+}
+</style>
+</head>
+<body>
+<div class="bg-motion"></div>
+
+<!-- WELCOME -->
+<section class="screen active" id="view-welcome">
+  <div class="mark">Live Motion Telemetry</div>
+  <h1 class="title-xl">Stay With <span class="em">Motion</span></h1>
+  <p class="lede">Your real speed, measured live from GPS satellites — on foot, by car, in the air.</p>
+  <div class="chips">
+    <span class="chip">Walking</span>
+    <span class="chip">Driving</span>
+    <span class="chip">Flying</span>
+  </div>
+  <button class="btn btn-primary" id="btnBegin" style="margin-top:10px">Begin</button>
+</section>
+
+<!-- PERMISSION -->
+<section class="screen" id="view-permission">
+  <svg class="pin" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.6">
+    <path d="M12 21s7-6.2 7-11.5A7 7 0 0 0 5 9.5C5 14.8 12 21 12 21z"/>
+    <circle cx="12" cy="9.5" r="2.4" fill="var(--accent)" stroke="none"/>
+  </svg>
+  <h1 class="title-xl" style="font-size:26px">Turn on location</h1>
+  <div class="perm-card">
+    <p>Stay With Motion reads your device's GPS to calculate real-time speed. Nothing is simulated — every number comes from an actual satellite fix.</p>
+    <p>Signal may take a few seconds outdoors, and won't be reliable indoors — that's a GPS limit, not an app one.</p>
+  </div>
+  <div class="err" id="permErr"></div>
+  <button class="btn btn-primary" id="btnEnable">Enable Location</button>
+</section>
+
+<!-- LIVE -->
+<section class="screen" id="view-live">
+  <div class="pulse-row"><span class="dot wait" id="dot"></span><span id="statusText">Waiting for signal</span></div>
+
+  <div class="gauge-wrap">
+    <svg viewBox="0 0 220 130">
+      <path d="M20 110 A90 90 0 0 1 200 110" fill="none" stroke="var(--surface2)" stroke-width="14" stroke-linecap="round"/>
+      <path id="arc" d="M20 110 A90 90 0 0 1 200 110" fill="none" stroke="var(--accent)" stroke-width="14" stroke-linecap="round"
+            stroke-dasharray="282.7" stroke-dashoffset="282.7"/>
+    </svg>
+    <div class="readout">
+      <div class="num" id="speed">0.0</div>
+      <div class="u">KM/H</div>
+    </div>
+  </div>
+
+  <div class="stat-row">
+    <div class="stat"><div class="v" id="mps">--</div><div class="l">M/S</div></div>
+    <div class="stat"><div class="v" id="mph">--</div><div class="l">MPH</div></div>
+    <div class="stat"><div class="v" id="maxSpeed">--</div><div class="l">PEAK KM/H</div></div>
+    <div class="stat"><div class="v" id="acc">--</div><div class="l">±M GPS</div></div>
+  </div>
+  <p class="acc-note" id="accNote"></p>
+
+  <button class="btn btn-ghost" id="btnStop">Stop tracking</button>
+</section>
+
+<p class="foot">© Silicon — Stay With Motion</p>
+
+<script>
+const views = {
+  welcome: document.getElementById('view-welcome'),
+  permission: document.getElementById('view-permission'),
+  live: document.getElementById('view-live'),
+};
+function show(name){
+  Object.values(views).forEach(v => v.classList.remove('active'));
+  views[name].classList.add('active');
+}
+
+document.getElementById('btnBegin').addEventListener('click', () => show('permission'));
+document.getElementById('btnStop').addEventListener('click', () => { stop(); show('welcome'); });
+document.getElementById('btnEnable').addEventListener('click', start);
+
+let watchId = null, maxKmh = 0, lastPos = null;
+const dotEl = document.getElementById('dot');
+const statusTextEl = document.getElementById('statusText');
+const speedEl = document.getElementById('speed');
+const arcEl = document.getElementById('arc');
+const mpsEl = document.getElementById('mps');
+const mphEl = document.getElementById('mph');
+const maxEl = document.getElementById('maxSpeed');
+const accEl = document.getElementById('acc');
+const accNoteEl = document.getElementById('accNote');
+const permErrEl = document.getElementById('permErr');
+
+const ARC_LEN = 282.7;   // circumference of the semicircle path above
+const SCALE_MAX_KMH = 180; // gauge full-scale reference
+
+function setStatus(kind, text){
+  dotEl.className = 'dot ' + kind;
+  statusTextEl.textContent = text;
+}
+
+function haversine(lat1, lon1, lat2, lon2){
+  const R = 6371000, toRad = d => d * Math.PI/180;
+  const dLat = toRad(lat2-lat1), dLon = toRad(lon2-lon1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function updateDisplay(mps, accuracy){
+  if(mps == null || isNaN(mps) || mps < 0) mps = 0;
+  const kmh = mps * 3.6, mph = mps * 2.23694;
+  speedEl.textContent = kmh.toFixed(1);
+  mpsEl.textContent = mps.toFixed(2);
+  mphEl.textContent = mph.toFixed(1);
+  if(kmh > maxKmh){ maxKmh = kmh; maxEl.textContent = maxKmh.toFixed(1); }
+  const pct = Math.min(kmh / SCALE_MAX_KMH, 1);
+  arcEl.setAttribute('stroke-dashoffset', (ARC_LEN * (1 - pct)).toFixed(1));
+  if(accuracy != null){
+    accEl.textContent = Math.round(accuracy);
+    accNoteEl.textContent = 'Fix accuracy ≈ ±' + Math.round(accuracy) + ' m — smaller is more reliable.';
+  }
+}
+
+function handlePosition(pos){
+  const { speed, accuracy, latitude, longitude } = pos.coords;
+  const now = pos.timestamp;
+  if(speed != null && !isNaN(speed)){
+    setStatus('live', 'Live — GPS-reported speed');
+    updateDisplay(speed, accuracy);
+  } else if(lastPos){
+    const dt = (now - lastPos.t) / 1000;
+    if(dt > 0.3){
+      const derived = haversine(lastPos.lat, lastPos.lon, latitude, longitude) / dt;
+      setStatus('live', 'Live — derived from movement');
+      updateDisplay(derived, accuracy);
+    }
+  } else {
+    setStatus('wait', 'First fix acquired, calculating...');
+  }
+  lastPos = { lat: latitude, lon: longitude, t: now };
+}
+
+function handleError(err){
+  const raw = 'code ' + err.code + ': ' + (err.message || '');
+  let msg;
+  if(err.code === 1) msg = 'Permission denied (' + raw + '). Allow location for this page and try again.';
+  else if(err.code === 2) msg = 'Position unavailable (' + raw + '). Try under open sky.';
+  else msg = 'Timed out (' + raw + '). Try again.';
+  permErrEl.textContent = msg;
+  permErrEl.classList.add('show');
+  setStatus('bad', 'Signal lost');
+}
+
+async function start(){
+  permErrEl.classList.remove('show');
+  if(!('geolocation' in navigator)){
+    permErrEl.textContent = 'Geolocation API not available in this environment.';
+    permErrEl.classList.add('show');
+    return;
+  }
+  if(!window.isSecureContext){
+    permErrEl.textContent = 'GPS requires a secure (HTTPS) connection.';
+    permErrEl.classList.add('show');
+    return;
+  }
+  watchId = navigator.geolocation.watchPosition(handlePosition, handleError, {
+    enableHighAccuracy: true, maximumAge: 3000, timeout: 25000
+  });
+  show('live');
+  setStatus('wait', 'Requesting GPS fix...');
+}
+
+function stop(){
+  if(watchId != null) navigator.geolocation.clearWatch(watchId);
+  watchId = null; lastPos = null; maxKmh = 0;
+  speedEl.textContent = '0.0'; arcEl.setAttribute('stroke-dashoffset', ARC_LEN);
+  mpsEl.textContent = mphEl.textContent = maxEl.textContent = accEl.textContent = '--';
+  accNoteEl.textContent = '';
+}
+</script>
+</body>
+</html>
