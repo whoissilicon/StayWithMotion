@@ -226,9 +226,10 @@ const permErrEl = document.getElementById('permErr');
 const motionMsgEl = document.getElementById('motionMsg');
 
 const ARC_LEN = 282.7;   // circumference of the semicircle path above
-const SCALE_MAX_KMH = 180; // gauge full-scale reference
+const SCALE_MAX_KMH = 300; // gauge full-scale reference — covers walking through aircraft ground speed
 const NOISE_FLOOR_MPS = 0.28;   // ~1 km/h — below this, treat GPS drift as standing still
 const WALK_CEILING_KMH = 7;     // above this, treat as fast/vehicle motion
+const SMOOTH_WINDOW = 2;        // short window: kills single-fix jitter without lagging real accel/decel
 let speedHistory = [];
 
 function setStatus(kind, text){
@@ -248,7 +249,7 @@ function updateDisplay(mps, accuracy){
   if(mps < NOISE_FLOOR_MPS) mps = 0; // ignore GPS position jitter while standing still
 
   speedHistory.push(mps);
-  if(speedHistory.length > 4) speedHistory.shift();
+  if(speedHistory.length > SMOOTH_WINDOW) speedHistory.shift();
   const smoothed = speedHistory.reduce((a,b) => a+b, 0) / speedHistory.length;
 
   const kmh = smoothed * 3.6, mph = smoothed * 2.23694;
