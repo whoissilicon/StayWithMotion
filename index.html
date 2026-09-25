@@ -161,6 +161,7 @@ body{
   <div class="perm-card">
     <p>Stay With Motion reads your device's GPS to calculate real-time speed. Nothing is simulated — every number comes from an actual satellite fix.</p>
     <p>Signal may take a few seconds outdoors, and won't be reliable indoors — that's a GPS limit, not an app one.</p>
+    <p>With motion sensor access, it also counts real steps and estimates step-based distance — shown separately from GPS distance, since they're measured two different ways.</p>
   </div>
   <div class="err" id="permErr"></div>
   <button class="btn btn-primary" id="btnEnable">Enable Location</button>
@@ -190,6 +191,11 @@ body{
     <div class="stat"><div class="v" id="maxSpeed">--</div><div class="l">PEAK KM/H</div></div>
     <div class="stat"><div class="v" id="acc">--</div><div class="l">±M GPS</div></div>
   </div>
+  <div class="stat-row">
+    <div class="stat"><div class="v" id="dist">0</div><div class="l">GPS DIST (M)</div></div>
+    <div class="stat"><div class="v" id="steps">0</div><div class="l">STEPS</div></div>
+    <div class="stat"><div class="v" id="stepDist">0</div><div class="l">STEP DIST (M)</div></div>
+  </div>
   <p class="acc-note" id="accNote"></p>
 
   <button class="btn btn-ghost" id="btnStop">Stop tracking</button>
@@ -212,7 +218,11 @@ document.getElementById('btnBegin').addEventListener('click', () => show('permis
 document.getElementById('btnStop').addEventListener('click', () => { stop(); show('welcome'); });
 document.getElementById('btnEnable').addEventListener('click', start);
 
-let watchId = null, maxKmh = 0, lastPos = null;
+let watchId = null, maxKmh = 0;
+let lastGoodPos = null, lastGoodTime = null, lastGoodSpeedMps = 0;
+let totalDistanceM = 0;
+let stepCount = 0, stepDistanceM = 0, motionAttached = false;
+let gLow = 9.8, lastStepTime = 0;
 const dotEl = document.getElementById('dot');
 const statusTextEl = document.getElementById('statusText');
 const speedEl = document.getElementById('speed');
@@ -221,6 +231,9 @@ const mpsEl = document.getElementById('mps');
 const mphEl = document.getElementById('mph');
 const maxEl = document.getElementById('maxSpeed');
 const accEl = document.getElementById('acc');
+const distEl = document.getElementById('dist');
+const stepsEl = document.getElementById('steps');
+const stepDistEl = document.getElementById('stepDist');
 const accNoteEl = document.getElementById('accNote');
 const permErrEl = document.getElementById('permErr');
 const motionMsgEl = document.getElementById('motionMsg');
@@ -230,6 +243,10 @@ const SCALE_MAX_KMH = 300; // gauge full-scale reference — covers walking thro
 const NOISE_FLOOR_MPS = 0.28;   // ~1 km/h — below this, treat GPS drift as standing still
 const WALK_CEILING_KMH = 7;     // above this, treat as fast/vehicle motion
 const SMOOTH_WINDOW = 2;        // short window: kills single-fix jitter without lagging real accel/decel
+const MAX_ACCEL_MPS2 = 8;       // physically generous ceiling — a jump beyond this in one update is a GPS glitch, not real motion
+const STRIDE_LENGTH_M = 0.75;   // average adult stride, used only for the step-based distance estimate
+const STEP_THRESHOLD = 1.2;     // dynamic acceleration (m/s²) that counts as a footstep
+const STEP_MIN_INTERVAL = 280;  // ms — blocks double-counting a single step
 let speedHistory = [];
 
 function setStatus(kind, text){
@@ -279,20 +296,70 @@ function updateDisplay(mps, accuracy){
 function handlePosition(pos){
   const { speed, accuracy, latitude, longitude } = pos.coords;
   const now = pos.timestamp;
-  if(speed != null && !isNaN(speed)){
-    setStatus('live', 'Live — GPS-reported speed');
-    updateDisplay(speed, accuracy);
-  } else if(lastPos){
-    const dt = (now - lastPos.t) / 1000;
-    if(dt > 0.3){
-      const derived = haversine(lastPos.lat, lastPos.lon, latitude, longitude) / dt;
-      setStatus('live', 'Live — derived from movement');
-      updateDisplay(derived, accuracy);
-    }
-  } else {
+
+  if(lastGoodPos == null){
+    // First fix: establish a baseline only, don't claim a speed yet
+    lastGoodPos = { lat: latitude, lon: longitude };
+    lastGoodTime = now;
+    lastGoodSpeedMps = (speed != null && !isNaN(speed)) ? speed : 0;
     setStatus('wait', 'First fix acquired, calculating...');
+    updateDisplay(lastGoodSpeedMps, accuracy);
+    return;
   }
-  lastPos = { lat: latitude, lon: longitude, t: now };
+
+  const dt = (now - lastGoodTime) / 1000;
+  if(dt <= 0.15) return; // duplicate/near-duplicate fix, nothing meaningful to compute
+
+  const segmentM = haversine(lastGoodPos.lat, lastGoodPos.lon, latitude, longitude);
+  const derivedMps = segmentM / dt;
+  const candidateMps = (speed != null && !isNaN(speed)) ? speed : derivedMps;
+
+  // Reject physically impossible jumps (multipath/signal-reacquisition glitches),
+  // e.g. a stationary bicycle suddenly reading 220 km/h — real motion can't accelerate that fast.
+  const maxDelta = MAX_ACCEL_MPS2 * dt + 2; // +2 m/s buffer for ordinary GPS quantization noise
+  if(Math.abs(candidateMps - lastGoodSpeedMps) > maxDelta){
+    setStatus('live', 'Stabilizing signal...');
+    return; // don't move the baseline forward — next real fix is compared against the last trusted one
+  }
+
+  if(candidateMps >= NOISE_FLOOR_MPS){
+    totalDistanceM += segmentM;
+    distEl.textContent = Math.round(totalDistanceM);
+  }
+  lastGoodPos = { lat: latitude, lon: longitude };
+  lastGoodTime = now;
+  lastGoodSpeedMps = candidateMps;
+
+  setStatus('live', (speed != null && !isNaN(speed)) ? 'Live — GPS-reported speed' : 'Live — derived from movement');
+  updateDisplay(candidateMps, accuracy);
+}
+
+async function enableMotionSensor(){
+  if(motionAttached) return;
+  if(typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function'){
+    try{
+      const state = await DeviceMotionEvent.requestPermission();
+      if(state !== 'granted') return;
+    }catch(e){ return; }
+  }
+  window.addEventListener('devicemotion', handleMotion);
+  motionAttached = true;
+}
+
+function handleMotion(e){
+  const a = e.accelerationIncludingGravity || e.acceleration;
+  if(!a || a.x == null) return;
+  const mag = Math.sqrt(a.x*a.x + a.y*a.y + a.z*a.z);
+  gLow = gLow*0.9 + mag*0.1;          // adaptive gravity baseline
+  const dynamic = mag - gLow;         // motion component with gravity removed
+  const now = Date.now();
+  if(dynamic > STEP_THRESHOLD && (now - lastStepTime) > STEP_MIN_INTERVAL){
+    lastStepTime = now;
+    stepCount++;
+    stepDistanceM += STRIDE_LENGTH_M;
+    stepsEl.textContent = stepCount;
+    stepDistEl.textContent = Math.round(stepDistanceM);
+  }
 }
 
 function handleError(err){
@@ -318,8 +385,9 @@ async function start(){
     permErrEl.classList.add('show');
     return;
   }
+  await enableMotionSensor(); // step counting; harmless if declined or unsupported
   watchId = navigator.geolocation.watchPosition(handlePosition, handleError, {
-    enableHighAccuracy: true, maximumAge: 3000, timeout: 25000
+    enableHighAccuracy: true, maximumAge: 0, timeout: 20000
   });
   show('live');
   setStatus('wait', 'Requesting GPS fix...');
@@ -327,9 +395,12 @@ async function start(){
 
 function stop(){
   if(watchId != null) navigator.geolocation.clearWatch(watchId);
-  watchId = null; lastPos = null; maxKmh = 0; speedHistory = [];
+  if(motionAttached){ window.removeEventListener('devicemotion', handleMotion); motionAttached = false; }
+  watchId = null; lastGoodPos = null; lastGoodTime = null; lastGoodSpeedMps = 0;
+  maxKmh = 0; speedHistory = []; totalDistanceM = 0; stepCount = 0; stepDistanceM = 0;
   speedEl.textContent = '0.0'; arcEl.setAttribute('stroke-dashoffset', ARC_LEN);
   mpsEl.textContent = mphEl.textContent = maxEl.textContent = accEl.textContent = '--';
+  distEl.textContent = stepsEl.textContent = stepDistEl.textContent = '0';
   accNoteEl.textContent = '';
   motionMsgEl.textContent = "You're not moving";
   motionMsgEl.className = 'motion-msg still';
