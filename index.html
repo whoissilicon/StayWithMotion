@@ -219,7 +219,7 @@ document.getElementById('btnStop').addEventListener('click', () => { stop(); sho
 document.getElementById('btnEnable').addEventListener('click', start);
 
 let watchId = null, maxKmh = 0;
-let lastGoodPos = null, lastGoodTime = null, lastGoodSpeedMps = 0;
+let lastGoodPos = null, lastGoodTime = null, lastGoodSpeedMps = 0, lastGoodAccuracy = null;
 let totalDistanceM = 0;
 let stepCount = 0, stepDistanceM = 0, motionAttached = false;
 let magSmooth = 9.81, stepPhase = 'idle', lastStepTime = 0;
@@ -243,7 +243,7 @@ const SCALE_MAX_KMH = 300; // gauge full-scale reference — covers walking thro
 const NOISE_FLOOR_MPS = 0.28;   // ~1 km/h — below this, treat GPS drift as standing still
 const WALK_CEILING_KMH = 7;     // above this, treat as fast/vehicle motion
 const SMOOTH_WINDOW = 2;        // short window: kills single-fix jitter without lagging real accel/decel
-const MAX_ACCEL_MPS2 = 8;       // physically generous ceiling — a jump beyond this in one update is a GPS glitch, not real motion
+const MAX_ACCEL_MPS2 = 18;      // physically generous ceiling for the derived fallback only — a jump beyond this is a position glitch, not real motion
 const STRIDE_LENGTH_M = 0.75;   // average adult stride, used only for the step-based distance estimate
 const GRAVITY_MPS2 = 9.81;
 const STEP_UPPER = 1.15;        // dynamic accel (m/s²) above gravity that starts a step's rising edge
@@ -303,6 +303,7 @@ function handlePosition(pos){
     // First fix: establish a baseline only, don't claim a speed yet
     lastGoodPos = { lat: latitude, lon: longitude };
     lastGoodTime = now;
+    lastGoodAccuracy = accuracy;
     lastGoodSpeedMps = (speed != null && !isNaN(speed)) ? speed : 0;
     setStatus('wait', 'First fix acquired, calculating...');
     updateDisplay(lastGoodSpeedMps, accuracy);
@@ -313,15 +314,33 @@ function handlePosition(pos){
   if(dt <= 0.15) return; // duplicate/near-duplicate fix, nothing meaningful to compute
 
   const segmentM = haversine(lastGoodPos.lat, lastGoodPos.lon, latitude, longitude);
-  const derivedMps = segmentM / dt;
-  const candidateMps = (speed != null && !isNaN(speed)) ? speed : derivedMps;
+  const usingDeviceSpeed = (speed != null && !isNaN(speed));
+  let candidateMps;
 
-  // Reject physically impossible jumps (multipath/signal-reacquisition glitches),
-  // e.g. a stationary bicycle suddenly reading 220 km/h — real motion can't accelerate that fast.
-  const maxDelta = MAX_ACCEL_MPS2 * dt + 2; // +2 m/s buffer for ordinary GPS quantization noise
-  if(Math.abs(candidateMps - lastGoodSpeedMps) > maxDelta){
-    setStatus('live', 'Stabilizing signal...');
-    return; // don't move the baseline forward — next real fix is compared against the last trusted one
+  if(usingDeviceSpeed){
+    // The phone's GPS chip computes this from the Doppler shift of the satellite signals
+    // itself and is already hardware-filtered — trust it directly, don't second-guess it.
+    candidateMps = speed;
+  } else {
+    // If the phone moved less than the combined uncertainty of the two fixes, that
+    // displacement is statistically indistinguishable from GPS drift while lying still —
+    // treat it as no movement rather than computing a phantom speed from noise.
+    const combinedAcc = (accuracy != null ? accuracy : 25) + (lastGoodAccuracy != null ? lastGoodAccuracy : 25);
+    let derivedMps;
+    if(segmentM < combinedAcc){
+      derivedMps = 0;
+    } else {
+      derivedMps = segmentM / dt;
+      // Only this position-delta fallback is vulnerable to a single bad fix producing an
+      // impossible jump (e.g. a multipath glitch reading 220 km/h on a bicycle), so the
+      // acceleration-plausibility check applies only here — never to the device's own speed field.
+      const maxDelta = MAX_ACCEL_MPS2 * dt + 2; // +2 m/s buffer for ordinary GPS quantization noise
+      if(Math.abs(derivedMps - lastGoodSpeedMps) > maxDelta){
+        setStatus('live', 'Stabilizing signal...');
+        return; // don't move the baseline forward — next real fix is compared against the last trusted one
+      }
+    }
+    candidateMps = derivedMps;
   }
 
   if(candidateMps >= NOISE_FLOOR_MPS){
@@ -330,9 +349,10 @@ function handlePosition(pos){
   }
   lastGoodPos = { lat: latitude, lon: longitude };
   lastGoodTime = now;
+  lastGoodAccuracy = accuracy;
   lastGoodSpeedMps = candidateMps;
 
-  setStatus('live', (speed != null && !isNaN(speed)) ? 'Live — GPS-reported speed' : 'Live — derived from movement');
+  setStatus('live', usingDeviceSpeed ? 'Live — GPS-reported speed' : 'Live — derived from movement');
   updateDisplay(candidateMps, accuracy);
 }
 
@@ -398,7 +418,7 @@ async function start(){
   }
   await enableMotionSensor(); // step counting; harmless if declined or unsupported
   watchId = navigator.geolocation.watchPosition(handlePosition, handleError, {
-    enableHighAccuracy: true, maximumAge: 0, timeout: 20000
+    enableHighAccuracy: true, maximumAge: 1000, timeout: 20000
   });
   show('live');
   setStatus('wait', 'Requesting GPS fix...');
@@ -407,7 +427,7 @@ async function start(){
 function stop(){
   if(watchId != null) navigator.geolocation.clearWatch(watchId);
   if(motionAttached){ window.removeEventListener('devicemotion', handleMotion); motionAttached = false; }
-  watchId = null; lastGoodPos = null; lastGoodTime = null; lastGoodSpeedMps = 0;
+  watchId = null; lastGoodPos = null; lastGoodTime = null; lastGoodSpeedMps = 0; lastGoodAccuracy = null;
   maxKmh = 0; speedHistory = []; totalDistanceM = 0; stepCount = 0; stepDistanceM = 0;
   magSmooth = 9.81; stepPhase = 'idle';
   speedEl.textContent = '0.0'; arcEl.setAttribute('stroke-dashoffset', ARC_LEN);
