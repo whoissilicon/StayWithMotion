@@ -222,7 +222,7 @@ let watchId = null, maxKmh = 0;
 let lastGoodPos = null, lastGoodTime = null, lastGoodSpeedMps = 0;
 let totalDistanceM = 0;
 let stepCount = 0, stepDistanceM = 0, motionAttached = false;
-let gLow = 9.8, lastStepTime = 0;
+let magSmooth = 9.81, stepPhase = 'idle', lastStepTime = 0;
 const dotEl = document.getElementById('dot');
 const statusTextEl = document.getElementById('statusText');
 const speedEl = document.getElementById('speed');
@@ -245,7 +245,9 @@ const WALK_CEILING_KMH = 7;     // above this, treat as fast/vehicle motion
 const SMOOTH_WINDOW = 2;        // short window: kills single-fix jitter without lagging real accel/decel
 const MAX_ACCEL_MPS2 = 8;       // physically generous ceiling — a jump beyond this in one update is a GPS glitch, not real motion
 const STRIDE_LENGTH_M = 0.75;   // average adult stride, used only for the step-based distance estimate
-const STEP_THRESHOLD = 1.2;     // dynamic acceleration (m/s²) that counts as a footstep
+const GRAVITY_MPS2 = 9.81;
+const STEP_UPPER = 1.15;        // dynamic accel (m/s²) above gravity that starts a step's rising edge
+const STEP_LOWER = -0.6;        // falling back below this confirms the step completed
 const STEP_MIN_INTERVAL = 280;  // ms — blocks double-counting a single step
 let speedHistory = [];
 
@@ -350,15 +352,24 @@ function handleMotion(e){
   const a = e.accelerationIncludingGravity || e.acceleration;
   if(!a || a.x == null) return;
   const mag = Math.sqrt(a.x*a.x + a.y*a.y + a.z*a.z);
-  gLow = gLow*0.9 + mag*0.1;          // adaptive gravity baseline
-  const dynamic = mag - gLow;         // motion component with gravity removed
+  magSmooth = magSmooth*0.7 + mag*0.3;   // smooth sensor noise
+  const dyn = magSmooth - GRAVITY_MPS2;  // magnitude removes orientation dependence, so gravity is a constant here
   const now = Date.now();
-  if(dynamic > STEP_THRESHOLD && (now - lastStepTime) > STEP_MIN_INTERVAL){
-    lastStepTime = now;
-    stepCount++;
-    stepDistanceM += STRIDE_LENGTH_M;
-    stepsEl.textContent = stepCount;
-    stepDistEl.textContent = Math.round(stepDistanceM);
+
+  // A real step is a rise above STEP_UPPER followed by a fall below STEP_LOWER —
+  // counting on that full cycle (not on every threshold crossing) is what keeps this from
+  // over-counting sensor jitter or under-counting a single hard footfall.
+  if(stepPhase === 'idle' && dyn > STEP_UPPER){
+    stepPhase = 'rising';
+  } else if(stepPhase === 'rising' && dyn < STEP_LOWER){
+    stepPhase = 'idle';
+    if(now - lastStepTime > STEP_MIN_INTERVAL){
+      lastStepTime = now;
+      stepCount++;
+      stepDistanceM += STRIDE_LENGTH_M;
+      stepsEl.textContent = stepCount;
+      stepDistEl.textContent = Math.round(stepDistanceM);
+    }
   }
 }
 
@@ -398,6 +409,7 @@ function stop(){
   if(motionAttached){ window.removeEventListener('devicemotion', handleMotion); motionAttached = false; }
   watchId = null; lastGoodPos = null; lastGoodTime = null; lastGoodSpeedMps = 0;
   maxKmh = 0; speedHistory = []; totalDistanceM = 0; stepCount = 0; stepDistanceM = 0;
+  magSmooth = 9.81; stepPhase = 'idle';
   speedEl.textContent = '0.0'; arcEl.setAttribute('stroke-dashoffset', ARC_LEN);
   mpsEl.textContent = mphEl.textContent = maxEl.textContent = accEl.textContent = '--';
   distEl.textContent = stepsEl.textContent = stepDistEl.textContent = '0';
